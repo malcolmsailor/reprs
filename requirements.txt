@@ -1,4 +1,4 @@
 numpy
 pandas
 tqdm
--e /Users/malcolm/google_drive/python/malmus/music_df/main
+music_df @ git+https://github.com/malcolmsailor/music_df.git
