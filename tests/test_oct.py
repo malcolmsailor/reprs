@@ -10,6 +10,8 @@ from music_df.read_midi import read_midi
 from music_df.sort_df import sort_df
 
 from reprs.oct import (
+    MAX_INST,
+    MAX_PITCH,
     POS_RESOLUTION,
     oct_decode,
     oct_encode,
@@ -110,3 +112,71 @@ def test_oct_encode(n_kern_files):
     #     df = read_humdrum(path)
     #     encoding = oct_encode(df)
     #     breakpoint()
+
+
+def test_percussion_channel_handling():
+    """Test that notes on channel 9 are encoded as drums with pitch offset."""
+    df = pd.DataFrame(
+        [
+            {"type": "bar", "onset": 0.0},
+            {"type": "time_signature", "onset": 0.0, "other": '{"numerator": 4, "denominator": 4}'},
+            {
+                "type": "note",
+                "onset": 0.0,
+                "release": 1.0,
+                "pitch": 36,
+                "channel": 9,
+                "velocity": 100,
+            },
+            {
+                "type": "note",
+                "onset": 1.0,
+                "release": 2.0,
+                "pitch": 60,
+                "channel": 0,
+                "velocity": 100,
+            },
+        ]
+    )
+
+    encoding = oct_encode(df)
+    tokens = encoding._tokens
+
+    assert len(tokens) == 2
+
+    drum_token = next(t for t in tokens if t.position == 0)
+    melodic_token = next(t for t in tokens if t.position != 0)
+
+    assert drum_token.pitch == 36 + MAX_PITCH + 1
+    assert drum_token.instrument == MAX_INST + 1
+    assert melodic_token.pitch == 60
+    assert melodic_token.instrument == 0
+
+    decoded = oct_decode(tokens)
+    decoded_notes = decoded[decoded.type == "note"].sort_values("onset").reset_index(drop=True)
+
+    assert decoded_notes.loc[0, "pitch"] == 36
+    assert decoded_notes.loc[1, "pitch"] == 60
+
+
+def test_percussion_without_channel_column():
+    """Test that encoding works when channel column is absent (backward compatibility)."""
+    df = pd.DataFrame(
+        [
+            {"type": "bar", "onset": 0.0},
+            {"type": "time_signature", "onset": 0.0, "other": '{"numerator": 4, "denominator": 4}'},
+            {
+                "type": "note",
+                "onset": 0.0,
+                "release": 1.0,
+                "pitch": 36,
+                "velocity": 100,
+            },
+        ]
+    )
+
+    encoding = oct_encode(df)
+    tokens = encoding._tokens
+
+    assert len(tokens) == 1
+    assert tokens[0].pitch == 36
