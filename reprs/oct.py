@@ -487,7 +487,7 @@ def oct_encode(
         for df_i, note in sub_df[sub_df.type == "note"].iterrows():
             is_drum = "channel" in note.index and note.channel == 9
             octuple = OctupleToken(
-                bar=int(note.bar_number),
+                bar=int(note.bar_number) % BAR_MAX,
                 position=int(note.pos_token),
                 instrument=int(MAX_INST + 1 if is_drum else note.midi_instrument),
                 pitch=int(note.pitch + MAX_PITCH + 1 if is_drum else note.pitch),
