@@ -168,11 +168,25 @@ def token_to_duration(x):
 
 
 def velocity_to_token(x):
+    x = max(0, min(x, MAX_VELOCITY))
     return x // VELOCITY_QUANT
 
 
 def token_to_velocity(x):
     return (x * VELOCITY_QUANT) + (VELOCITY_QUANT // 2)
+
+
+def pitch_to_token(pitch: int, is_drum: bool) -> int:
+    pitch = max(0, min(pitch, MAX_PITCH))
+    if is_drum:
+        return pitch + MAX_PITCH + 1
+    return pitch
+
+
+def instrument_to_token(midi_instrument: int, is_drum: bool) -> int:
+    if is_drum:
+        return MAX_INST + 1
+    return max(0, min(midi_instrument, MAX_INST))
 
 
 def tempo_to_token(x):
@@ -489,8 +503,8 @@ def oct_encode(
             octuple = OctupleToken(
                 bar=int(note.bar_number) % BAR_MAX,
                 position=int(note.pos_token),
-                instrument=int(MAX_INST + 1 if is_drum else note.midi_instrument),
-                pitch=int(note.pitch + MAX_PITCH + 1 if is_drum else note.pitch),
+                instrument=instrument_to_token(int(note.midi_instrument), is_drum),
+                pitch=pitch_to_token(int(note.pitch), is_drum),
                 duration=int(note.dur_token),
                 velocity=int(note.velocity_token),
                 time_sig=int(note.time_sig_token),
