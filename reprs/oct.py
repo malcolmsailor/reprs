@@ -445,15 +445,20 @@ def oct_encode(
     settings: OctupleEncodingSettings = OctupleEncodingSettings(),
     feature_names: Sequence[str] = (),
     sort: bool = True,
+    omit_percussion: bool = False,
+    return_df: bool = False,
     **kwargs,
-) -> OctupleEncoding:
+) -> OctupleEncoding | tuple[OctupleEncoding, pd.DataFrame]:
     for kwarg in kwargs:
         LOGGER.warning(f"unused kwarg to midilike_encode '{kwarg}'")
 
     source_id = music_df.attrs.get("source_id", "unknown")
     if not len(music_df):
         # Score is empty
-        return OctupleEncoding([], {}, [], [], source_id=source_id)
+        empty_encoding = OctupleEncoding([], {}, [], [], source_id=source_id)
+        if return_df:
+            return empty_encoding, pd.DataFrame()
+        return empty_encoding
 
     if settings.encoded_targets:
         assert settings.target_columns
@@ -496,10 +501,13 @@ def oct_encode(
 
     df_dict = split_musicdf(music_df)
     df_indices = []
+    preprocessed_df_indices = []  # Track indices in the preprocessed music_df
 
     for inst_tuple, sub_df in df_dict.items():
         for df_i, note in sub_df[sub_df.type == "note"].iterrows():
             is_drum = "channel" in note.index and note.channel == 9
+            if omit_percussion and is_drum:
+                continue
             octuple = OctupleToken(
                 bar=int(note.bar_number) % BAR_MAX,
                 position=int(note.pos_token),
@@ -512,6 +520,7 @@ def oct_encode(
             )
             tokens.append(octuple)
             df_indices.append(music_df.loc[df_i, "src_indices"])  # type:ignore
+            preprocessed_df_indices.append(df_i)
             for name in feature_names:
                 if name == "bar_delta":
                     # (Malcolm 2024-01-11) It would be nice to do this in a less hacky
@@ -529,12 +538,16 @@ def oct_encode(
             onsets.append(note.onset)
 
     if len(tokens) == 0:
-        return OctupleEncoding([], {}, [], [], source_id=source_id)
+        empty_encoding = OctupleEncoding([], {}, [], [], source_id=source_id)
+        if return_df:
+            return empty_encoding, pd.DataFrame()
+        return empty_encoding
 
     sorted_indices = sorted(list(range(len(tokens))), key=tokens.__getitem__)
     tokens = [tokens[i] for i in sorted_indices]
 
     df_indices = [df_indices[i] for i in sorted_indices]
+    preprocessed_df_indices = [preprocessed_df_indices[i] for i in sorted_indices]
     features = {
         name: [feature[i] for i in sorted_indices] for name, feature in features.items()
     }
@@ -543,6 +556,9 @@ def oct_encode(
         tokens, features, onsets, df_indices, source_id=source_id
     )
 
+    if return_df:
+        result_df = music_df.loc[preprocessed_df_indices].reset_index(drop=True)
+        return encoding, result_df
     return encoding
 
 

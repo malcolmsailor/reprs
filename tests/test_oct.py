@@ -10,8 +10,10 @@ from music_df.read_midi import read_midi
 from music_df.sort_df import sort_df
 
 from reprs.oct import (
+    BAR_MAX,
     MAX_INST,
     MAX_PITCH,
+    OctupleEncoding,
     POS_RESOLUTION,
     oct_decode,
     oct_encode,
@@ -180,3 +182,124 @@ def test_percussion_without_channel_column():
 
     assert len(tokens) == 1
     assert tokens[0].pitch == 36
+
+
+def test_omit_percussion():
+    """Test that omit_percussion=True excludes drum notes."""
+    df = pd.DataFrame(
+        [
+            {"type": "bar", "onset": 0.0},
+            {"type": "time_signature", "onset": 0.0, "other": '{"numerator": 4, "denominator": 4}'},
+            {"type": "note", "onset": 0.0, "release": 1.0, "pitch": 36, "channel": 9, "velocity": 100},
+            {"type": "note", "onset": 1.0, "release": 2.0, "pitch": 60, "channel": 0, "velocity": 100},
+        ]
+    )
+
+    encoding = oct_encode(df, omit_percussion=True)
+    tokens = encoding._tokens
+
+    assert len(tokens) == 1
+    assert tokens[0].pitch == 60
+
+
+def test_return_df():
+    """Test that return_df=True returns the preprocessed DataFrame alongside encoding."""
+    df = pd.DataFrame(
+        [
+            {"type": "bar", "onset": 0.0},
+            {"type": "time_signature", "onset": 0.0, "other": '{"numerator": 4, "denominator": 4}'},
+            {"type": "note", "onset": 0.0, "release": 1.0, "pitch": 60, "velocity": 80},
+            {"type": "note", "onset": 1.0, "release": 2.0, "pitch": 64, "velocity": 100},
+            {"type": "note", "onset": 2.0, "release": 3.0, "pitch": 67, "velocity": 64},
+        ]
+    )
+
+    # Test default behavior (return_df=False)
+    result = oct_encode(df, return_df=False)
+    assert isinstance(result, OctupleEncoding)
+
+    # Test return_df=True
+    result_with_df = oct_encode(df, return_df=True)
+    assert isinstance(result_with_df, tuple)
+    assert len(result_with_df) == 2
+    encoding, result_df = result_with_df
+    assert isinstance(encoding, OctupleEncoding)
+    assert isinstance(result_df, pd.DataFrame)
+
+    tokens = encoding._tokens
+
+    # Verify same number of rows as tokens
+    assert len(result_df) == len(tokens)
+
+    # Verify token values match df columns
+    for i, token in enumerate(tokens):
+        row = result_df.iloc[i]
+        assert token.bar == int(row.bar_number) % BAR_MAX
+        assert token.position == row.pos_token
+        assert token.duration == row.dur_token
+        assert token.velocity == row.velocity_token
+        assert token.time_sig == row.time_sig_token
+        assert token.tempo == row.tempo_token
+
+
+def test_return_df_with_drums():
+    """Test that return_df works correctly with drum notes."""
+    # Need track column when channel is present to work with split_musicdf
+    df = pd.DataFrame(
+        [
+            {"type": "bar", "onset": 0.0, "track": 0},
+            {"type": "time_signature", "onset": 0.0, "other": '{"numerator": 4, "denominator": 4}', "track": 0},
+            {"type": "note", "onset": 0.0, "release": 1.0, "pitch": 36, "channel": 9, "velocity": 100, "track": 0},
+            {"type": "note", "onset": 1.0, "release": 2.0, "pitch": 60, "channel": 0, "velocity": 100, "track": 0},
+        ]
+    )
+
+    encoding, result_df = oct_encode(df, return_df=True)
+    tokens = encoding._tokens
+
+    assert len(result_df) == len(tokens) == 2
+
+    # Verify drum note has correct pitch offset
+    for i, token in enumerate(tokens):
+        row = result_df.iloc[i]
+        is_drum = "channel" in row.index and row.channel == 9
+        if is_drum:
+            assert token.pitch == int(row.pitch) + MAX_PITCH + 1
+            assert token.instrument == MAX_INST + 1
+        else:
+            assert token.pitch == int(row.pitch)
+
+
+def test_return_df_with_omit_percussion():
+    """Test that return_df with omit_percussion=True excludes percussion from both."""
+    # Need track column when channel is present to work with split_musicdf
+    df = pd.DataFrame(
+        [
+            {"type": "bar", "onset": 0.0, "track": 0},
+            {"type": "time_signature", "onset": 0.0, "other": '{"numerator": 4, "denominator": 4}', "track": 0},
+            {"type": "note", "onset": 0.0, "release": 1.0, "pitch": 36, "channel": 9, "velocity": 100, "track": 0},
+            {"type": "note", "onset": 1.0, "release": 2.0, "pitch": 60, "channel": 0, "velocity": 100, "track": 0},
+            {"type": "note", "onset": 2.0, "release": 3.0, "pitch": 38, "channel": 9, "velocity": 100, "track": 0},
+        ]
+    )
+
+    encoding, result_df = oct_encode(df, omit_percussion=True, return_df=True)
+    tokens = encoding._tokens
+
+    # Only the non-drum note should be included
+    assert len(tokens) == 1
+    assert len(result_df) == 1
+    assert tokens[0].pitch == 60
+    assert result_df.iloc[0].pitch == 60
+
+
+def test_return_df_empty():
+    """Test return_df with empty DataFrame."""
+    df = pd.DataFrame(columns=["type", "onset", "release", "pitch", "velocity"])
+
+    result = oct_encode(df, return_df=True)
+    assert isinstance(result, tuple)
+    encoding, result_df = result
+
+    assert len(encoding._tokens) == 0
+    assert len(result_df) == 0
